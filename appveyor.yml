@@ -1,0 +1,145 @@
+environment:
+    AccessTokenDokanDoc:
+      secure: DN88uTxiO/keexbCfFg47FGQvXG3BaxWeYJvZftxGQ7tHLrBPnAqjZe4LmwuofFa
+    global:
+      DOKAN_CI_CACHE: C:\dokan_ci_cache
+      DOXYGEN_INST_DIR: '%DOKAN_CI_CACHE%\doxygen'
+
+version: 2.1.0-{build}
+configuration:
+- Release
+- Debug
+os: Visual Studio 2022
+branches:
+  only:
+    - master
+
+# To debug build issues, add your own fork to AppVeyor and uncomment below.
+# Connection details will be printed to the console output.
+# $blockRdp makes the build block until a file is deleted from the desktop.
+#init:
+#- ps: Invoke-Expression (Invoke-WebRequest 'https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1')
+#on_finish:
+#- ps: $blockRdp = $true; Invoke-Expression (Invoke-WebRequest 'https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1')
+
+install:
+ - ps: |
+      function Exec-External {
+          param(
+             [Parameter(Position=0,Mandatory=1)][scriptblock] $command
+          )
+          & $command
+          if ($LASTEXITCODE -ne 0) {
+              throw ("Command returned non-zero error-code ${LASTEXITCODE}: $command")
+          }
+      }
+ - ps: |
+      Write-Host "Dokan download..." -ForegroundColor Green
+      New-item -type directory -path C:\projects\dokan-dotnet\ -Force
+      Start-FileDownload 'https://github.com/dokan-dev/dokany/releases/download/v2.1.0.1000/DokanSetup.exe' -FileName 'C:\projects\dokan-dotnet\DokanSetup.exe'
+      Write-Host "Dokan downloaded." -ForegroundColor Green
+ - cmd: |
+     C:\projects\dokan-dotnet\DokanSetup.exe /quiet
+
+before_build:
+  - nuget restore
+build:
+  project: DokanNet.sln
+  verbosity: minimal
+after_build:
+  - ps: |
+      #Stop the mirror process and wait for the driver to be unmounted.
+      Function Stop-Mirror {
+          param(
+              [Parameter(Position=0,Mandatory=1)][System.ComponentModel.Component] $app
+          )
+          Stop-Process -Id $app.Id
+          Wait-Process -Id $app.Id -EA SilentlyContinue
+          
+          $countdown = 1
+          while ((Test-Path 'N:\'))
+          {
+              Write-output "Waiting for unmount and Counting down $Countdown"
+              Start-Sleep -Seconds 1
+              if($countdown++ -ge 5) {
+                  Throw "It took more than 5 seconds to unmount"
+              }
+          }
+      }
+  - ps: |
+      git clone -q https://github.com/Liryna/winfstest.git
+      $buildCmd = "MSBuild.exe"
+      $buildArgs = @(
+         ".\winfstest\winfstest.sln",
+         "/m",
+         "/l:C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll",
+         "/p:Configuration=Debug",
+         "/p:Platform=x64")
+      Exec-External { & $buildCmd $buildArgs }
+      New-Item C:\TMP -type directory
+      ls c:\TMP
+      
+      foreach ($target in @("net462")) {
+         if ($app) {
+            Write-Host "Waiting for the driver to unmount..."
+            Stop-Mirror($app)
+         }
+         Write-Host "Run Windows file system testing for $target..." -ForegroundColor Green
+         $app = Start-Process -passthru .\sample\DokanNetMirror\bin\$env:CONFIGURATION\$target\win\DokanNetMirror.exe
+         Start-Sleep -s 5
+         
+         Exec-External { & .\winfstest\TestSuite\run-winfstest.bat t\base N:\TMP\ }
+         Start-Sleep -s 5
+      }
+      #Stop the process from the last iteration, but do not wait for the driver to unmount.
+      Stop-Process -Id $app.Id
+test:
+  categories:
+    except:
+      - Manual
+      - Timing
+      
+on_success:
+    - ps: |
+          if ($env:CONFIGURATION -eq "Release") {
+              if ("$env:APPVEYOR_PULL_REQUEST_TITLE" -or "$env:APPVEYOR_REPO_BRANCH" -ne "master") {
+                return;
+              }
+              
+              $env:PATH = "$env:DOXYGEN_INST_DIR;$env:PATH"
+              if (Test-Path $env:DOXYGEN_INST_DIR) {
+                Write-Host "Doxygen in cache, skipping."
+                return
+              }
+              New-Item -Force -Type Directory $env:DOXYGEN_INST_DIR | Out-Null
+              cd $env:DOXYGEN_INST_DIR
+              $doxygen_zip = "$env:TEMP\doxygen.zip"
+              # Version has to be < 1.8.12 because doxyboot theme is incompatible with later versions
+              # https://github.com/Velron/doxygen-bootstrapped/issues/20
+              # https://github.com/Velron/doxygen-bootstrapped/issues/27
+              Write-Host "Downloading Doxygen..."
+              Invoke-WebRequest https://netcologne.dl.sourceforge.net/project/doxygen/rel-1.8.11/doxygen-1.8.11.windows.x64.bin.zip -OutFile $doxygen_zip -UserAgent [Microsoft.PowerShell.Commands.PSUserAgent]::FireFox
+              if ($(Get-FileHash -Algorithm SHA256 $doxygen_zip).Hash -ne "6CE7C259975FB3DC449313913DE71B89665D15C49CF674DB6952F304BB3DFAAA") {
+                throw "Hash mismatch while downloading Doxygen"
+              }
+              Exec-External { & 7z x -y "$doxygen_zip" }
+              
+              # Update documentation
+              cd $env:APPVEYOR_BUILD_FOLDER\DokanNet\documentations
+              git config --global user.email "appveyor@appveyor.org"
+              git config --global user.name "appveyor"
+              git.exe clone -b gh-pages --single-branch  https://lirynastark:$($env:AccessTokenDokanDoc)@github.com/dokan-dev/dokan-dotnet-doc.git doc
+              Exec-External { & doxygen.exe Doxyfile }
+              cd doc
+              if ($(git status --porcelain)) {
+                Write-Host "Update documentation..." -ForegroundColor Green
+                git add -A
+                Write-Host "All changes ready to commit" -ForegroundColor Green
+                git commit -m "Latest documentation on successful appveyor build $env:APPVEYOR_BUILD_VERSION auto-pushed to gh-pages"
+                Write-Host "Push changes..." -ForegroundColor Green
+                git push -f origin gh-pages
+                Write-Host "Pushed. Documentation updated!" -ForegroundColor Green
+              } else {
+                Write-Host "No documentation changes detected." -ForegroundColor Green
+              }
+          }

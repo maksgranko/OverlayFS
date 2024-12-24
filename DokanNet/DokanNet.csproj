@@ -1,0 +1,51 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net6.0-windows;netstandard2.0;net462;net40</TargetFrameworks>
+    <AssemblyName>DokanNet</AssemblyName>
+    <RootNamespace>DokanNet</RootNamespace>
+    <Description>A user mode file system for windows. 
+
+This is a .NET wrapper over Dokan, and allows you to create your own file systems in Windows.</Description>
+    <Copyright>Copyright (C) 2022</Copyright>
+    <Version>2.1.0.0</Version>
+    <AssemblyVersion>2.2024.359.19</AssemblyVersion>
+    <FileVersion>2.2024.359.19</FileVersion>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+	<PackageReadmeFile>README.md</PackageReadmeFile>
+    <Company>Dokan-dev</Company>
+    <Authors>AdrienJ, MaximeC, Hiroki Asakawa</Authors>
+    <PackageProjectUrl>https://dokan-dev.github.io/</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>dokan_logo.png</PackageIcon>
+    <RepositoryUrl>https://github.com/dokan-dev/dokan-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>dokan file files disk directory storage filesystem io filestore FAT NTFS FUSE</PackageTags>
+    <AssemblyOriginatorKeyFile>Dokan.snk</AssemblyOriginatorKeyFile>
+    <SignAssembly>True</SignAssembly>
+    <CLSCompliant>True</CLSCompliant>
+    <LangVersion>Latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="documentations\**" />
+    <EmbeddedResource Remove="documentations\**" />
+    <None Remove="documentations\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\dokan_logo.png" Pack="true" PackagePath="\" />
+	<None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.IO.FileSystem.AccessControl" Version="4.7.0" />
+    <PackageReference Include="System.Security.Principal.Windows" Version="4.7.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net40'">
+    <PackageReference Include="StringInterpolationBridgeStrong" Version="0.9.1" />
+  </ItemGroup>
+
+</Project>
